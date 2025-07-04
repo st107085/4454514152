@@ -3,13 +3,27 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
 import { MessageSquare, PlusCircle, LogIn, UserPlus, LogOut, Users, ChevronLeft } from 'lucide-react'; // For icons
 
-// Global variables provided by the Canvas environment
-// These variables are provided at runtime by the Canvas environment.
-// We declare them as const with a fallback to avoid 'no-undef' errors during local build.
+// Global variables provided by the Canvas environment (for Canvas preview only)
 // eslint-disable-next-line no-undef
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-// eslint-disable-next-line no-undef
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// --- Firebase Configuration (IMPORTANT: Replace with your actual Firebase project config) ---
+// When deploying outside of Canvas (e.g., GitHub Pages), __firebase_config is not available.
+// You MUST replace the placeholder values below with your actual Firebase project configuration.
+// You can find these values in your Firebase project settings -> "Your apps" -> Web app.
+const firebaseConfig = {
+  apiKey: "AIzaSyC7fN4YKU8hBODHLPuYWmc_uMAarDkx1_M", // <-- REPLACED WITH YOUR ACTUAL API KEY
+  authDomain: "w0d-af047.firebaseapp.com", // <-- REPLACED WITH YOUR ACTUAL AUTH DOMAIN
+  projectId: "w0d-af047", // <-- REPLACED WITH YOUR ACTUAL PROJECT ID
+  storageBucket: "w0d-af047.firebasestorage.app", // <-- REPLACED WITH YOUR ACTUAL STORAGE BUCKET
+  messagingSenderId: "590475681719", // <-- REPLACED WITH YOUR ACTUAL MESSAGING SENDER ID
+  appId: "1:590475681719:web:70fe72a37b39c07fdc5232" // <-- REPLACED WITH YOUR ACTUAL APP ID
+  // measurementId: "G-KHCH1GFKG3" // measurementId is optional and not directly used in this app's core functionality
+};
+
+// Use the Canvas-provided appId if available, otherwise use a default or derive from firebaseConfig.projectId
+const appId = canvasAppId !== 'default-app-id' ? canvasAppId : firebaseConfig.projectId;
+
 
 // Initialize Firebase (only Firestore is needed for messages)
 const app = initializeApp(firebaseConfig);
