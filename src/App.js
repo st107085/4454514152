@@ -4,7 +4,11 @@ import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTim
 import { MessageSquare, PlusCircle, LogIn, UserPlus, LogOut, Users, ChevronLeft } from 'lucide-react'; // For icons
 
 // Global variables provided by the Canvas environment
+// These variables are provided at runtime by the Canvas environment.
+// We declare them as const with a fallback to avoid 'no-undef' errors during local build.
+// eslint-disable-next-line no-undef
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// eslint-disable-next-line no-undef
 const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
 
 // Initialize Firebase (only Firestore is needed for messages)
@@ -300,21 +304,21 @@ function ChatRoom({ collectionPath, title, onBack }) {
     }, [db, collectionPath, userId]);
 
     const sendMessage = async (e) => {
-        e.preventDefault();
-        if (newMessage.trim() === '' || !currentUser) return; // Ensure user is logged in
+            e.preventDefault();
+            if (newMessage.trim() === '' || !currentUser) return; // Ensure user is logged in
 
-        try {
-            await addDoc(collection(db, ...collectionPath), {
-                text: newMessage,
-                senderId: currentUser.uid, // Use custom UID
-                senderUsername: currentUser.username, // Use custom username
-                timestamp: serverTimestamp(),
-            });
-            setNewMessage('');
-        } catch (error) {
-            console.error("Error sending message:", error);
-        }
-    };
+            try {
+                await addDoc(collection(db, ...collectionPath), {
+                    text: newMessage,
+                    senderId: currentUser.uid, // Use custom UID
+                    senderUsername: currentUser.username, // Use custom username
+                    timestamp: serverTimestamp(),
+                });
+                setNewMessage('');
+            } catch (error) {
+                console.error("Error sending message:", error);
+            }
+        };
 
     return (
         <div className="flex flex-col h-full bg-gray-50 rounded-lg shadow-md overflow-hidden">
