@@ -7,10 +7,14 @@ import { MessageSquare, PlusCircle, LogIn, UserPlus, LogOut, Users, ChevronLeft 
 // eslint-disable-next-line no-undef
 const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- Firebase Configuration (IMPORTANT: Replace with your actual Firebase project config) ---
+// --- Firebase Configuration (IMPORTANT: REPLACE ALL "YOUR_..." PLACEHOLDERS WITH YOUR ACTUAL FIREBASE PROJECT CONFIG) ---
 // When deploying outside of Canvas (e.g., GitHub Pages), __firebase_config is not available.
 // You MUST replace the placeholder values below with your actual Firebase project configuration.
-// You can find these values in your Firebase project settings -> "Your apps" -> Web app.
+// To get these values:
+// 1. Go to your Firebase project in the Firebase Console: https://console.firebase.google.com/
+// 2. Click on "Project settings" (the gear icon) in the left navigation.
+// 3. Under "Your apps", select your web app (usually indicated by a `</>` icon).
+// 4. Copy the `firebaseConfig` object provided there and paste it below.
 const firebaseConfig = {
   apiKey: "AIzaSyC7fN4YKU8hBODHLPuYWmc_uMAarDkx1_M", // <-- REPLACED WITH YOUR ACTUAL API KEY
   authDomain: "w0d-af047.firebaseapp.com", // <-- REPLACED WITH YOUR ACTUAL AUTH DOMAIN
@@ -637,38 +641,3 @@ export default function App() {
         </AuthProvider>
     );
 }
-
-// Tailwind CSS setup (included in HTML for direct use)
-// Custom scrollbar styles
-const style = document.createElement('style');
-style.innerHTML = `
-.custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 10px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 10px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #555;
-}
-`;
-document.head.appendChild(style);
-
-// Add Inter font
-const link = document.createElement('link');
-link.href = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap";
-link.rel = "stylesheet";
-document.head.appendChild(link);
-
-const styleBody = document.createElement('style');
-styleBody.innerHTML = `
-body {
-    font-family: 'Inter', sans-serif;
-}
-`;
-document.head.appendChild(styleBody);
