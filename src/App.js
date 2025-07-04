@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth'; // Import signOut
+import { getAuth, onAuthStateChanged, signOut, signInAnonymously } from 'firebase/auth'; // Re-added signInAnonymously
 import { MessageSquare, PlusCircle, LogIn, UserPlus, LogOut, Users, ChevronLeft } from 'lucide-react'; // For icons
 
 // Global variables provided by the Canvas environment (for Canvas preview only)
@@ -94,7 +94,7 @@ const specificGroupFounderPasswords = {
     "group_founder_032": "xY1#dF6^x!iJ",
     "group_founder_033": "zZ2$eG7*z@kL",
     "group_founder_034": "aB3&fH8!a#mM",
-    "group_founder_035": "cD4@gI9%c*nO",
+    "group_founder_035": "cD4@gI9%c*nO`",
     "group_founder_036": "eF5#hJ0^e!pQ",
     "group_founder_037": "gH6$iK1*g@rS",
     "group_founder_038": "iJ7&jL2!i#uV",
@@ -181,67 +181,59 @@ const AuthContext = createContext(null);
 // AuthProvider component to manage Firebase Authentication state
 function AuthProvider({ children }) {
     const [firebaseUser, setFirebaseUser] = useState(null); // Firebase User object
-    const [currentUser, setCurrentUser] = useState(null); // Custom user data from hardcodedUsers
+    const [currentUser, setCurrentUser] = useState(null); // Custom user data (username, role)
     const [loadingAuth, setLoadingAuth] = useState(true);
     const [userId, setUserId] = useState(null); // Firebase Auth UID for Firestore paths
 
     useEffect(() => {
         console.log("AuthProvider useEffect: Initializing auth listener...");
-        // Listen for Firebase Auth state changes
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
             console.log("onAuthStateChanged fired. User:", user);
             if (user) {
-                // User is signed in (e.g., anonymously)
+                // User is signed in (e.g., anonymously or via other methods)
                 setFirebaseUser(user);
-                setUserId(user.uid);
+                setUserId(user.uid); // Set Firebase Auth UID
                 console.log("Firebase user signed in. UID:", user.uid);
 
-                // Try to find the custom user data based on localStorage or default to anonymous
+                // Check if we have a custom user logged in via localStorage
                 const storedCustomUser = localStorage.getItem('currentUser');
                 if (storedCustomUser) {
                     const parsedUser = JSON.parse(storedCustomUser);
-                    // If the stored custom user's UID matches the Firebase Auth UID, use it.
-                    // Otherwise, it might be a new anonymous session, so treat as generic.
-                    // IMPORTANT: This comparison `parsedUser.uid === user.uid` will only work if your custom UIDs are Firebase UIDs.
-                    // Since we are using anonymous auth, user.uid is a Firebase generated UID.
-                    // So, we need to ensure the custom user's UID is stored against the *Firebase Auth UID* in Firestore
-                    // or use Firebase Custom Claims for role management.
-                    // For now, we'll prioritize the Firebase Auth UID for actual permissions.
-                    setCurrentUser(parsedUser); // Still set the custom user for display purposes
-                    console.log("Custom user data loaded from localStorage:", parsedUser);
-                } else {
-                    // If no custom user is logged in, treat them as a generic anonymous user
+                    // Use the custom username and role, but ensure the UID is the Firebase Auth UID
                     setCurrentUser({
-                        username: `匿名用戶-${user.uid.substring(0, 6)}`,
-                        uid: user.uid, // Use Firebase Auth UID for consistency
-                        role: 'anonymous'
+                        username: parsedUser.username,
+                        uid: user.uid, // Always use the Firebase Auth UID for currentUser.uid
+                        role: parsedUser.role
                     });
-                    console.log("No custom user in localStorage. Setting as anonymous user:", user.uid);
+                    console.log("Custom user data loaded from localStorage and associated with Firebase UID:", user.uid);
+                } else {
+                    // If no custom user from localStorage, and Firebase user is present (e.g., from a previous anonymous session)
+                    // We will treat them as an unauthenticated generic user for our custom system.
+                    // The UI will show the login screen if userId is null, which is what we want.
+                    // If they were anonymously logged in before, their UID is still valid for Firebase rules.
+                    setCurrentUser(null); // Explicitly set to null if no custom login
+                    console.log("No custom user in localStorage. User is currently Firebase authenticated (e.g., anonymously), but no custom profile loaded.");
                 }
             } else {
-                // No user is signed in, try to sign in anonymously
-                console.log("No Firebase user found. Attempting anonymous sign-in...");
-                try {
-                    await signInAnonymously(auth);
-                } catch (error) {
-                    console.error("Error signing in anonymously:", error);
-                }
+                // No Firebase user found, and we are NOT attempting anonymous sign-in automatically.
+                console.log("No Firebase user found. Not attempting anonymous sign-in.");
                 setFirebaseUser(null);
-                setCurrentUser(null); // Clear custom user data if Firebase user logs out
-                setUserId(null);
+                setCurrentUser(null);
+                setUserId(null); // Ensure userId is null if no Firebase user
             }
-            setLoadingAuth(false);
-            console.log("Auth loading complete. Current userId (might be stale due to closure):", userId);
+            setLoadingAuth(false); // Auth state is determined, stop loading.
+            console.log("Auth loading complete. Final Firebase Auth UID:", user ? user.uid : "null (no Firebase user)");
         });
 
         return () => {
             console.log("AuthProvider useEffect: Cleaning up auth listener.");
-            unsubscribe(); // Clean up the listener
+            unsubscribe();
         };
     }, []); // Empty dependency array means this runs once on mount
 
-    // Custom login function to map hardcoded credentials to Firebase Auth (if possible, or just for UI)
+    // Custom login function to map hardcoded credentials to UI state
     const customLogin = async (usernameInput, passwordInput) => {
+        console.log("customLogin: Attempting login for username:", usernameInput);
         const trimmedUsername = usernameInput.trim();
         const trimmedPassword = passwordInput.trim();
 
@@ -250,19 +242,33 @@ function AuthProvider({ children }) {
         );
 
         if (userFound) {
-            // For now, we only set the custom user data for UI purposes.
-            // The actual Firebase Auth UID (from anonymous auth) will still be used by Firestore rules.
-            setCurrentUser(userFound);
-            localStorage.setItem('currentUser', JSON.stringify(userFound)); // Persist custom user data
-            console.log("Custom login successful for:", userFound.username);
-            
-            // If you want the Firebase Auth UID to reflect the custom user's UID for rules,
-            // you'd need signInWithCustomToken, which requires a backend.
-            // For now, userId will remain the anonymous Firebase Auth UID, and roles are managed client-side for UI.
+            // Attempt to sign in anonymously first if not already signed in via Firebase Auth
+            // This ensures we get a Firebase UID for Firestore rules.
+            let firebaseAuthUid = auth.currentUser?.uid;
+            if (!firebaseAuthUid) {
+                console.log("customLogin: No active Firebase user, attempting anonymous sign-in to get UID...");
+                try {
+                    const userCredential = await signInAnonymously(auth); // Corrected: signInAnonymously is now imported
+                    firebaseAuthUid = userCredential.user.uid;
+                    console.log("customLogin: Anonymous Firebase sign-in successful, UID:", firebaseAuthUid);
+                } catch (error) {
+                    console.error("customLogin: Error during anonymous Firebase sign-in:", error);
+                    return { success: false, message: 'Firebase 登入失敗，請稍後再試。' };
+                }
+            }
 
-            return { success: true, user: userFound };
+            const updatedCustomUser = {
+                username: userFound.username,
+                uid: firebaseAuthUid, // Associate custom user with the Firebase Auth UID
+                role: userFound.role
+            };
+            setCurrentUser(updatedCustomUser);
+            setUserId(firebaseAuthUid); // Update userId state as well
+            localStorage.setItem('currentUser', JSON.stringify(updatedCustomUser));
+            console.log("customLogin: Login successful. Custom user set:", updatedCustomUser);
+            return { success: true, user: updatedCustomUser };
         }
-        console.log("Custom login failed for:", trimmedUsername);
+        console.log("customLogin: Login failed for:", trimmedUsername, " - Incorrect credentials.");
         return { success: false, message: '使用者名稱或密碼錯誤。' };
     };
 
@@ -272,7 +278,7 @@ function AuthProvider({ children }) {
             await signOut(auth); // Sign out from Firebase Auth
             setCurrentUser(null);
             setUserId(null);
-            localStorage.removeItem('currentUser');
+            localStorage.removeItem('currentUser'); // Clear custom user from localStorage
             console.log("Firebase signOut successful. Custom user data cleared.");
         } catch (error) {
             console.error("Error signing out:", error);
@@ -302,11 +308,17 @@ function CustomAuthScreen() {
     const [message, setMessage] = useState('');
 
     const handleLogin = async (e) => {
-        e.preventDefault();
-        setMessage('');
+        e.preventDefault(); // Prevent default form submission behavior
+        console.log("handleLogin: Login button clicked.");
+        setMessage(''); // Clear previous messages
         const result = await customLogin(usernameInput, passwordInput); // Await customLogin
         if (!result.success) {
             setMessage(result.message);
+            console.log("handleLogin: Login failed, message set:", result.message);
+        } else {
+            console.log("handleLogin: Login successful, redirecting...");
+            // No explicit redirect needed here, as AuthProvider's useEffect will update userId
+            // and MainAppContent will re-render, showing the main app.
         }
     };
 
@@ -353,11 +365,7 @@ function CustomAuthScreen() {
                         <LogIn className="mr-2" size={20} /> 登入
                     </button>
                 </form>
-                <div className="mt-6 text-center text-gray-600 text-sm">
-                    <p className="mt-4 font-semibold mb-2">其他測試帳號 (僅限聊天):</p>
-                    <p>使用者名稱: `group_founder_001`</p>
-                    <p>密碼: `pE9@F*&5Z!7q`</p>
-                </div>
+                {/* 移除 '其他測試帳號 (僅限聊天)' 區塊 */}
             </div>
         </div>
     );
@@ -553,7 +561,7 @@ function CreateMeetingModal({ onClose, onCreate }) {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
-                <h3 className="text-2xl font-bold text-gray-800 mb-6 text-center">新增會議</h3>
+                <h3 className="text-2xl font-bold text-center text-gray-800 mb-6">新增會議</h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="meetingName">
@@ -597,6 +605,13 @@ function MainAppContent() {
     const [selectedMeeting, setSelectedMeeting] = useState(null);
     const [showCreateMeetingModal, setShowCreateMeetingModal] = useState(false);
 
+    // Added for debugging: Log userId and currentUser whenever they change
+    useEffect(() => {
+        console.log("MainAppContent useEffect: userId changed to", userId);
+        console.log("MainAppContent useEffect: currentUser changed to", currentUser);
+    }, [userId, currentUser]);
+
+
     // Function to handle creating a new meeting (now uses Firebase Auth UID)
     const handleCreateMeeting = async (name) => {
         if (!currentUser || !userId) {
@@ -616,7 +631,9 @@ function MainAppContent() {
         }
     };
 
+    console.log("MainAppContent render: loadingAuth =", loadingAuth, ", userId =", userId);
     if (loadingAuth) {
+        console.log("MainAppContent: Still loading auth, rendering loading spinner.");
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-100">
                 <div className="flex items-center space-x-2">
@@ -632,9 +649,11 @@ function MainAppContent() {
     // If Firebase Auth is not ready or no user is signed in via Firebase Auth, show login screen.
     // This ensures userId is always populated when MainAppContent is rendered.
     if (!userId) { // Check for Firebase Auth UID
+        console.log("MainAppContent: userId is null, rendering CustomAuthScreen.");
         return <CustomAuthScreen />; // Use custom login screen, which will trigger anonymous auth
     }
 
+    console.log("MainAppContent: userId is present, rendering main app content.");
     return (
         <div className="min-h-screen bg-gray-100 font-inter flex flex-col">
             {/* Header */}
@@ -720,7 +739,7 @@ function MainAppContent() {
 }
 
 // Root App Component that wraps MainAppContent with AuthProvider
-export default function App() {
+export default function App() { // Corrected: Added '()' after App
     return (
         <AuthProvider>
             <MainAppContent />
