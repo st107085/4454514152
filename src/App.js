@@ -1,6 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // Import Firebase Auth
 import { MessageSquare, PlusCircle, LogIn, UserPlus, LogOut, Users, ChevronLeft } from 'lucide-react'; // For icons
 
 // Global variables provided by the Canvas environment (for Canvas preview only)
@@ -29,9 +30,10 @@ const firebaseConfig = {
 const appId = canvasAppId !== 'default-app-id' ? canvasAppId : firebaseConfig.projectId;
 
 
-// Initialize Firebase (only Firestore is needed for messages)
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app); // Initialize Firebase Auth
 
 // --- Helper function to generate a random password (no longer used for group founders, but kept if needed elsewhere) ---
 const generateRandomPassword = (length = 12) => {
@@ -45,14 +47,15 @@ const generateRandomPassword = (length = 12) => {
 };
 
 // --- Custom Authentication Data (Hardcoded for demonstration) ---
+// This data is for client-side UI login only. Firebase Security Rules will use Firebase Auth UID.
 const hardcodedUsers = {
     // Specific roles with provided passwords
-    '團隊總理最高執行發布人': { password: 'dwr5aw0r1.2', username: '團隊總理最高執行發布人', uid: 'uid-team-premier' },
-    '行政執行最高長': { password: '3rdfqw532.q3', username: '行政執行最高長', uid: 'uid-admin-chief' },
-    '行政執行最高秘書長': { password: 'fwq3rewr.3', username: '行政執行最高秘書長', uid: 'uid-admin-secretary' },
-    '行政執行訊息管理長': { password: 'rdsaww3r.rwr3t', username: '行政執行訊息管理長', uid: 'uid-admin-message' },
-    '行政執行外交管理長': { password: 'sawdaqq.155e', username: '行政執行外交管理長', uid: 'uid-admin-diplomatic' },
-    '行政執行法律管理長': { password: 'qsdddwwwqe.1', username: '行政執行法律管理長', uid: 'uid-admin-legal' },
+    '團隊總理最高執行發布人': { password: 'dwr5aw0r1.2', username: '團隊總理最高執行發布人', uid: 'uid-team-premier', role: 'teamPremier' },
+    '行政執行最高長': { password: '3rdfqw532.q3', username: '行政執行最高長', uid: 'uid-admin-chief', role: 'adminChief' },
+    '行政執行最高秘書長': { password: 'fwq3rewr.3', username: '行政執行最高秘書長', uid: 'uid-admin-secretary', role: 'adminSecretary' },
+    '行政執行訊息管理長': { password: 'rdsaww3r.rwr3t', username: '行政執行訊息管理長', uid: 'uid-admin-message', role: 'adminMessage' },
+    '行政執行外交管理長': { password: 'sawdaqq.155e', username: '行政執行外交管理長', uid: 'uid-admin-diplomatic', role: 'adminDiplomatic' },
+    '行政執行法律管理長': { password: 'qsdddwwwqe.1', username: '行政執行法律管理長', uid: 'uid-admin-legal', role: 'adminLegal' },
 };
 
 // Specific passwords for group founders provided by the user
@@ -166,59 +169,114 @@ for (let i = 1; i <= 100; i++) {
     hardcodedUsers[internalKey] = { // Use the internal key as the main key for hardcodedUsers
         password: specificGroupFounderPasswords[internalKey], // Use the specific password
         username: internalKey, // 將登入使用者名稱設定為 'group_founder_XXX'
-        uid: `uid-group-founder-${userNum}` // Unique ID
+        uid: `uid-group-founder-${userNum}`, // Unique ID
+        role: 'groupFounder' // Assign a role
     };
 }
 // --- End Custom Authentication Data ---
 
-// Create a context for Auth state (now custom)
+// Create a context for Auth state
 const AuthContext = createContext(null);
 
-// AuthProvider component to manage custom authentication state
+// AuthProvider component to manage Firebase Authentication state
 function AuthProvider({ children }) {
-    const [currentUser, setCurrentUser] = useState(null);
+    const [firebaseUser, setFirebaseUser] = useState(null); // Firebase User object
+    const [currentUser, setCurrentUser] = useState(null); // Custom user data from hardcodedUsers
     const [loadingAuth, setLoadingAuth] = useState(true);
-    const [userId, setUserId] = useState(null); // Unique ID for Firestore paths
+    const [userId, setUserId] = useState(null); // Firebase Auth UID for Firestore paths
 
     useEffect(() => {
-        // Simulate initial loading or check for persisted session (e.g., localStorage)
-        const storedUser = localStorage.getItem('currentUser');
-        if (storedUser) {
-            setCurrentUser(JSON.parse(storedUser));
-            setUserId(JSON.parse(storedUser).uid);
-        }
-        setLoadingAuth(false);
+        // Listen for Firebase Auth state changes
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                // User is signed in (e.g., anonymously)
+                setFirebaseUser(user);
+                setUserId(user.uid);
+
+                // Try to find the custom user data based on localStorage or default to anonymous
+                const storedCustomUser = localStorage.getItem('currentUser');
+                if (storedCustomUser) {
+                    const parsedUser = JSON.parse(storedCustomUser);
+                    // If the stored custom user's UID matches the Firebase Auth UID, use it.
+                    // Otherwise, it might be a new anonymous session, so treat as generic.
+                    if (parsedUser.uid === user.uid) { // This comparison won't work if custom UID is not Firebase UID
+                        setCurrentUser(parsedUser);
+                    } else {
+                        // Fallback for anonymous user if custom user doesn't match Firebase UID
+                        setCurrentUser({
+                            username: `匿名用戶-${user.uid.substring(0, 6)}`,
+                            uid: user.uid,
+                            role: 'anonymous'
+                        });
+                    }
+                } else {
+                    // If no custom user is logged in, treat them as a generic anonymous user
+                    setCurrentUser({
+                        username: `匿名用戶-${user.uid.substring(0, 6)}`,
+                        uid: user.uid,
+                        role: 'anonymous'
+                    });
+                }
+            } else {
+                // No user is signed in, try to sign in anonymously
+                try {
+                    await signInAnonymously(auth);
+                } catch (error) {
+                    console.error("Error signing in anonymously:", error);
+                }
+                setFirebaseUser(null);
+                setCurrentUser(null);
+                setUserId(null);
+            }
+            setLoadingAuth(false);
+        });
+
+        return () => unsubscribe(); // Clean up the listener
     }, []);
 
-    // Modified customLogin to find user by 'username' property (display name)
-    const customLogin = (usernameInput, passwordInput) => {
-        // Trim whitespace from inputs
+    // Custom login function to map hardcoded credentials to Firebase Auth (if possible, or just for UI)
+    const customLogin = async (usernameInput, passwordInput) => {
         const trimmedUsername = usernameInput.trim();
         const trimmedPassword = passwordInput.trim();
 
-        // Iterate through all hardcoded users to find a match by their 'username' (display name)
-        const user = Object.values(hardcodedUsers).find(
-            (u) => u.username === trimmedUsername
+        const userFound = Object.values(hardcodedUsers).find(
+            (u) => u.username === trimmedUsername && u.password === trimmedPassword
         );
 
-        if (user && user.password === trimmedPassword) {
-            setCurrentUser(user);
-            setUserId(user.uid);
-            localStorage.setItem('currentUser', JSON.stringify(user)); // Persist login
-            return { success: true, user };
+        if (userFound) {
+            // Here's the challenge: Firebase Security Rules use firebaseUser.uid.
+            // Our custom users have their own UIDs (uid-team-premier, uid-group-founder-XXX).
+            // To make Firebase rules work with these custom UIDs, we'd need:
+            // 1. A backend to mint custom tokens for these UIDs (advanced).
+            // 2. Or, store roles in Firestore documents indexed by Firebase Auth UID (more complex).
+            // For now, we'll just set the custom user data for UI purposes.
+            // The Firestore rules will still use the Firebase Auth UID (from anonymous auth).
+            setCurrentUser(userFound);
+            localStorage.setItem('currentUser', JSON.stringify(userFound)); // Persist custom user data
+            
+            // If you want the Firebase Auth UID to reflect the custom user's UID for rules,
+            // you'd need signInWithCustomToken, which requires a backend.
+            // For now, userId will remain the anonymous Firebase Auth UID.
+
+            return { success: true, user: userFound };
         }
         return { success: false, message: '使用者名稱或密碼錯誤。' };
     };
 
-    const customLogout = () => {
-        setCurrentUser(null);
-        setUserId(null);
-        localStorage.removeItem('currentUser'); // Clear persisted login
+    const customLogout = async () => {
+        try {
+            await auth.signOut(); // Sign out from Firebase Auth
+            setCurrentUser(null);
+            setUserId(null);
+            localStorage.removeItem('currentUser');
+        } catch (error) {
+            console.error("Error signing out:", error);
+        }
     };
 
-    // Provide db, currentUser, userId, loadingAuth, and custom auth functions to children
+    // Provide db, firebaseUser, currentUser (custom data), userId (Firebase Auth UID), loadingAuth, and custom auth functions
     return (
-        <AuthContext.Provider value={{ db, currentUser, userId, loadingAuth, customLogin, customLogout }}>
+        <AuthContext.Provider value={{ db, firebaseUser, currentUser, userId, loadingAuth, customLogin, customLogout }}>
             {children}
         </AuthContext.Provider>
     );
@@ -238,10 +296,10 @@ function CustomAuthScreen() {
     const [passwordInput, setPasswordInput] = useState('');
     const [message, setMessage] = useState('');
 
-    const handleLogin = (e) => {
+    const handleLogin = async (e) => {
         e.preventDefault();
         setMessage('');
-        const result = customLogin(usernameInput, passwordInput);
+        const result = await customLogin(usernameInput, passwordInput); // Await customLogin
         if (!result.success) {
             setMessage(result.message);
         }
@@ -290,7 +348,11 @@ function CustomAuthScreen() {
                         <LogIn className="mr-2" size={20} /> 登入
                     </button>
                 </form>
-                {/* 測試帳號範例已移除 */}
+                <div className="mt-6 text-center text-gray-600 text-sm">
+                    <p className="mt-4 font-semibold mb-2">其他測試帳號 (僅限聊天):</p>
+                    <p>使用者名稱: `group_founder_001`</p>
+                    <p>密碼: `pE9@F*&5Z!7q`</p>
+                </div>
             </div>
         </div>
     );
@@ -298,18 +360,17 @@ function CustomAuthScreen() {
 
 // Chat Room Component (reusable for General and Meeting chats)
 function ChatRoom({ collectionPath, title, onBack }) {
-    const { db, currentUser, userId } = useAuth(); // Use custom currentUser and userId
+    const { db, currentUser, userId } = useAuth(); // Use custom currentUser and Firebase Auth UID
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
 
     useEffect(() => {
-        if (!userId) {
-            setMessages([]); // Clear messages if user logs out
+        if (!userId) { // userId is Firebase Auth UID
+            setMessages([]); // Clear messages if user logs out or not authenticated by Firebase
             return;
         }
 
         // Listen for messages from Firestore
-        // Note: Firestore security rules should be configured to allow read/write based on current user's UID
         const q = query(collection(db, ...collectionPath), orderBy('timestamp'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -323,13 +384,13 @@ function ChatRoom({ collectionPath, title, onBack }) {
 
     const sendMessage = async (e) => {
             e.preventDefault();
-            if (newMessage.trim() === '' || !currentUser) return; // Ensure user is logged in
+            if (newMessage.trim() === '' || !currentUser || !userId) return; // Ensure user is logged in via custom system AND Firebase Auth
 
             try {
                 await addDoc(collection(db, ...collectionPath), {
                     text: newMessage,
-                    senderId: currentUser.uid, // Use custom UID
-                    senderUsername: currentUser.username, // Use custom username
+                    senderId: userId, // Use Firebase Auth UID for Firestore rules
+                    senderUsername: currentUser.username, // Use custom username for display
                     timestamp: serverTimestamp(),
                 });
                 setNewMessage('');
@@ -357,13 +418,13 @@ function ChatRoom({ collectionPath, title, onBack }) {
                         <div
                             key={msg.id}
                             className={`mb-3 p-3 rounded-lg max-w-[80%] ${
-                                msg.senderId === currentUser?.uid
+                                msg.senderId === userId // Compare with Firebase Auth UID
                                     ? 'bg-blue-200 ml-auto text-right'
                                     : 'bg-gray-200 mr-auto text-left'
                             }`}
                         >
                             <span className="font-semibold text-sm text-gray-700">
-                                {msg.senderId === currentUser?.uid ? '你' : msg.senderUsername}:
+                                {msg.senderId === userId ? '你' : msg.senderUsername}:
                             </span>
                             <p className="text-gray-800 break-words">{msg.text}</p>
                             <span className="text-xs text-gray-500">
@@ -380,12 +441,12 @@ function ChatRoom({ collectionPath, title, onBack }) {
                     onChange={(e) => setNewMessage(e.target.value)}
                     placeholder="輸入訊息..."
                     className="flex-grow border border-gray-300 rounded-full py-2 px-4 mr-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    disabled={!currentUser}
+                    disabled={!currentUser || !userId}
                 />
                 <button
                     type="submit"
                     className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-full transition duration-300 ease-in-out flex items-center justify-center"
-                    disabled={!currentUser}
+                    disabled={!currentUser || !userId}
                 >
                     <MessageSquare size={20} className="mr-1" /> 發送
                 </button>
@@ -396,11 +457,11 @@ function ChatRoom({ collectionPath, title, onBack }) {
 
 // Meetings List Component
 function MeetingsList({ onSelectMeeting, onCreateNewMeeting }) {
-    const { db, userId, currentUser } = useAuth(); // Use custom currentUser and userId
+    const { db, currentUser, userId } = useAuth(); // Use custom currentUser and Firebase Auth UID
     const [meetings, setMeetings] = useState([]);
 
     useEffect(() => {
-        if (!userId) return;
+        if (!userId) return; // userId is Firebase Auth UID
         const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'meetings'), orderBy('createdAt', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const meetingList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -418,7 +479,7 @@ function MeetingsList({ onSelectMeeting, onCreateNewMeeting }) {
                 <button
                     onClick={onCreateNewMeeting}
                     className="bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-full transition duration-300 ease-in-out flex items-center justify-center"
-                    disabled={!currentUser} // Disable if not logged in
+                    disabled={!currentUser || !(currentUser.role === 'teamPremier' || currentUser.role === 'adminChief')} // Disable based on custom role
                 >
                     <PlusCircle size={20} className="mr-1" /> 新增會議
                 </button>
@@ -516,15 +577,15 @@ function MainAppContent() {
     const [selectedMeeting, setSelectedMeeting] = useState(null);
     const [showCreateMeetingModal, setShowCreateMeetingModal] = useState(false);
 
-    // Function to handle creating a new meeting (now uses custom currentUser)
+    // Function to handle creating a new meeting (now uses Firebase Auth UID)
     const handleCreateMeeting = async (name) => {
-        if (!currentUser) return; // Ensure user is logged in
+        if (!currentUser || !userId) return; // Ensure user is logged in via custom system AND Firebase Auth
         try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'meetings'), {
                 name: name,
                 createdAt: serverTimestamp(),
-                creatorId: currentUser.uid,
-                creatorUsername: currentUser.username, // Use custom username
+                creatorId: userId, // Use Firebase Auth UID for Firestore rules
+                creatorUsername: currentUser.username, // Use custom username for display
             });
             console.log("Meeting created successfully!");
         } catch (error) {
@@ -545,8 +606,10 @@ function MainAppContent() {
         );
     }
 
-    if (!currentUser) {
-        return <CustomAuthScreen />; // Use custom login screen
+    // If Firebase Auth is not ready or no user is signed in via Firebase Auth, show login screen.
+    // This ensures userId is always populated when MainAppContent is rendered.
+    if (!userId) { // Check for Firebase Auth UID
+        return <CustomAuthScreen />; // Use custom login screen, which will trigger anonymous auth
     }
 
     return (
@@ -556,7 +619,7 @@ function MainAppContent() {
                 <h1 className="text-2xl font-bold">聊天網頁</h1>
                 <div className="flex items-center space-x-4">
                     <span className="text-sm">
-                        嗨，{currentUser.username}！ (ID: {userId})
+                        嗨，{currentUser?.username || `匿名用戶-${userId.substring(0, 6)}`}！ (ID: {userId})
                     </span>
                     <button
                         onClick={customLogout} // Use custom logout
