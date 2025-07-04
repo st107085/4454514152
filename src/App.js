@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth'; // Import Firebase Auth
+import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth'; // Import signOut
 import { MessageSquare, PlusCircle, LogIn, UserPlus, LogOut, Users, ChevronLeft } from 'lucide-react'; // For icons
 
 // Global variables provided by the Canvas environment (for Canvas preview only)
@@ -22,8 +22,8 @@ const firebaseConfig = {
   projectId: "w0d-af047", // <-- REPLACED WITH YOUR ACTUAL PROJECT ID
   storageBucket: "w0d-af047.firebasestorage.app", // <-- REPLACED WITH YOUR ACTUAL STORAGE BUCKET
   messagingSenderId: "590475681719", // <-- REPLACED WITH YOUR ACTUAL MESSAGING SENDER ID
-  appId: "1:590475681719:web:70fe72a37b39c07fdc5232" // <-- REPLACED WITH YOUR ACTUAL APP ID
-  // measurementId: "G-KHCH1GFKG3" // measurementId is optional and not directly used in this app's core functionality
+  appId: "1:590475681719:web:70fe72a37b39c07fdc5232", // <-- REPLACED WITH YOUR ACTUAL APP ID
+  measurementId: "G-KHCH1GFKG3" // measurementId is optional and not directly used in this app's core functionality
 };
 
 // Use the Canvas-provided appId if available, otherwise use a default or derive from firebaseConfig.projectId
@@ -186,12 +186,15 @@ function AuthProvider({ children }) {
     const [userId, setUserId] = useState(null); // Firebase Auth UID for Firestore paths
 
     useEffect(() => {
+        console.log("AuthProvider useEffect: Initializing auth listener...");
         // Listen for Firebase Auth state changes
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
+            console.log("onAuthStateChanged fired. User:", user);
             if (user) {
                 // User is signed in (e.g., anonymously)
                 setFirebaseUser(user);
                 setUserId(user.uid);
+                console.log("Firebase user signed in. UID:", user.uid);
 
                 // Try to find the custom user data based on localStorage or default to anonymous
                 const storedCustomUser = localStorage.getItem('currentUser');
@@ -199,40 +202,43 @@ function AuthProvider({ children }) {
                     const parsedUser = JSON.parse(storedCustomUser);
                     // If the stored custom user's UID matches the Firebase Auth UID, use it.
                     // Otherwise, it might be a new anonymous session, so treat as generic.
-                    if (parsedUser.uid === user.uid) { // This comparison won't work if custom UID is not Firebase UID
-                        setCurrentUser(parsedUser);
-                    } else {
-                        // Fallback for anonymous user if custom user doesn't match Firebase UID
-                        setCurrentUser({
-                            username: `匿名用戶-${user.uid.substring(0, 6)}`,
-                            uid: user.uid,
-                            role: 'anonymous'
-                        });
-                    }
+                    // IMPORTANT: This comparison `parsedUser.uid === user.uid` will only work if your custom UIDs are Firebase UIDs.
+                    // Since we are using anonymous auth, user.uid is a Firebase generated UID.
+                    // So, we need to ensure the custom user's UID is stored against the *Firebase Auth UID* in Firestore
+                    // or use Firebase Custom Claims for role management.
+                    // For now, we'll prioritize the Firebase Auth UID for actual permissions.
+                    setCurrentUser(parsedUser); // Still set the custom user for display purposes
+                    console.log("Custom user data loaded from localStorage:", parsedUser);
                 } else {
                     // If no custom user is logged in, treat them as a generic anonymous user
                     setCurrentUser({
                         username: `匿名用戶-${user.uid.substring(0, 6)}`,
-                        uid: user.uid,
+                        uid: user.uid, // Use Firebase Auth UID for consistency
                         role: 'anonymous'
                     });
+                    console.log("No custom user in localStorage. Setting as anonymous user:", user.uid);
                 }
             } else {
                 // No user is signed in, try to sign in anonymously
+                console.log("No Firebase user found. Attempting anonymous sign-in...");
                 try {
                     await signInAnonymously(auth);
                 } catch (error) {
                     console.error("Error signing in anonymously:", error);
                 }
                 setFirebaseUser(null);
-                setCurrentUser(null);
+                setCurrentUser(null); // Clear custom user data if Firebase user logs out
                 setUserId(null);
             }
             setLoadingAuth(false);
+            console.log("Auth loading complete. Current userId (might be stale due to closure):", userId);
         });
 
-        return () => unsubscribe(); // Clean up the listener
-    }, []);
+        return () => {
+            console.log("AuthProvider useEffect: Cleaning up auth listener.");
+            unsubscribe(); // Clean up the listener
+        };
+    }, []); // Empty dependency array means this runs once on mount
 
     // Custom login function to map hardcoded credentials to Firebase Auth (if possible, or just for UI)
     const customLogin = async (usernameInput, passwordInput) => {
@@ -244,31 +250,30 @@ function AuthProvider({ children }) {
         );
 
         if (userFound) {
-            // Here's the challenge: Firebase Security Rules use firebaseUser.uid.
-            // Our custom users have their own UIDs (uid-team-premier, uid-group-founder-XXX).
-            // To make Firebase rules work with these custom UIDs, we'd need:
-            // 1. A backend to mint custom tokens for these UIDs (advanced).
-            // 2. Or, store roles in Firestore documents indexed by Firebase Auth UID (more complex).
-            // For now, we'll just set the custom user data for UI purposes.
-            // The Firestore rules will still use the Firebase Auth UID (from anonymous auth).
+            // For now, we only set the custom user data for UI purposes.
+            // The actual Firebase Auth UID (from anonymous auth) will still be used by Firestore rules.
             setCurrentUser(userFound);
             localStorage.setItem('currentUser', JSON.stringify(userFound)); // Persist custom user data
+            console.log("Custom login successful for:", userFound.username);
             
             // If you want the Firebase Auth UID to reflect the custom user's UID for rules,
             // you'd need signInWithCustomToken, which requires a backend.
-            // For now, userId will remain the anonymous Firebase Auth UID.
+            // For now, userId will remain the anonymous Firebase Auth UID, and roles are managed client-side for UI.
 
             return { success: true, user: userFound };
         }
+        console.log("Custom login failed for:", trimmedUsername);
         return { success: false, message: '使用者名稱或密碼錯誤。' };
     };
 
     const customLogout = async () => {
         try {
-            await auth.signOut(); // Sign out from Firebase Auth
+            console.log("Attempting Firebase signOut...");
+            await signOut(auth); // Sign out from Firebase Auth
             setCurrentUser(null);
             setUserId(null);
             localStorage.removeItem('currentUser');
+            console.log("Firebase signOut successful. Custom user data cleared.");
         } catch (error) {
             console.error("Error signing out:", error);
         }
@@ -365,6 +370,7 @@ function ChatRoom({ collectionPath, title, onBack }) {
     const [newMessage, setNewMessage] = useState('');
 
     useEffect(() => {
+        console.log(`ChatRoom useEffect for ${title}: userId is`, userId);
         if (!userId) { // userId is Firebase Auth UID
             setMessages([]); // Clear messages if user logs out or not authenticated by Firebase
             return;
@@ -375,16 +381,23 @@ function ChatRoom({ collectionPath, title, onBack }) {
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setMessages(msgs);
+            console.log(`Fetched ${msgs.length} messages for ${title}.`);
         }, (error) => {
-            console.error("Error fetching messages:", error);
+            console.error(`Error fetching messages for ${title}:`, error);
         });
 
-        return () => unsubscribe();
-    }, [db, collectionPath, userId]);
+        return () => {
+            console.log(`ChatRoom useEffect cleanup for ${title}.`);
+            unsubscribe();
+        };
+    }, [db, collectionPath, userId, title]);
 
     const sendMessage = async (e) => {
             e.preventDefault();
-            if (newMessage.trim() === '' || !currentUser || !userId) return; // Ensure user is logged in via custom system AND Firebase Auth
+            if (newMessage.trim() === '' || !currentUser || !userId) {
+                console.log("Cannot send message: Message empty, or currentUser/userId not available.");
+                return; // Ensure user is logged in via custom system AND Firebase Auth
+            }
 
             try {
                 await addDoc(collection(db, ...collectionPath), {
@@ -394,6 +407,7 @@ function ChatRoom({ collectionPath, title, onBack }) {
                     timestamp: serverTimestamp(),
                 });
                 setNewMessage('');
+                console.log("Message sent successfully.");
             } catch (error) {
                 console.error("Error sending message:", error);
             }
@@ -461,15 +475,20 @@ function MeetingsList({ onSelectMeeting, onCreateNewMeeting }) {
     const [meetings, setMeetings] = useState([]);
 
     useEffect(() => {
+        console.log("MeetingsList useEffect: userId is", userId);
         if (!userId) return; // userId is Firebase Auth UID
         const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'meetings'), orderBy('createdAt', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const meetingList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setMeetings(meetingList);
+            console.log(`Fetched ${meetingList.length} meetings.`);
         }, (error) => {
             console.error("Error fetching meetings:", error);
         });
-        return () => unsubscribe();
+        return () => {
+            console.log("MeetingsList useEffect cleanup.");
+            unsubscribe();
+        };
     }, [db, userId]);
 
     return (
@@ -479,7 +498,8 @@ function MeetingsList({ onSelectMeeting, onCreateNewMeeting }) {
                 <button
                     onClick={onCreateNewMeeting}
                     className="bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-full transition duration-300 ease-in-out flex items-center justify-center"
-                    disabled={!currentUser || !(currentUser.role === 'teamPremier' || currentUser.role === 'adminChief')} // Disable based on custom role
+                    // Disable based on custom role (client-side UI only)
+                    disabled={!currentUser || !(currentUser.role === 'teamPremier' || currentUser.role === 'adminChief')}
                 >
                     <PlusCircle size={20} className="mr-1" /> 新增會議
                 </button>
@@ -579,7 +599,10 @@ function MainAppContent() {
 
     // Function to handle creating a new meeting (now uses Firebase Auth UID)
     const handleCreateMeeting = async (name) => {
-        if (!currentUser || !userId) return; // Ensure user is logged in via custom system AND Firebase Auth
+        if (!currentUser || !userId) {
+            console.log("Cannot create meeting: currentUser or userId not available.");
+            return; // Ensure user is logged in via custom system AND Firebase Auth
+        }
         try {
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'meetings'), {
                 name: name,
